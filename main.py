@@ -16,92 +16,97 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Obtener el token de Figma desde variables de entorno
+# Configuración de la API de Figma
 FIGMA_TOKEN = os.getenv("FIGMA_TOKEN")
-FIGMA_FILE_KEY = "WnXRJb9D39JEVUir53ShUy"  # Cambia esto si el archivo en Figma cambia
+FIGMA_FILE_KEY = "WnXRJb9D39JEVUir53ShUy"
+HEADERS = {"X-Figma-Token": FIGMA_TOKEN, "Content-Type": "application/json"}
 
 # Modelo de respuesta esperada
 class WireframeResponse(BaseModel):
     info: str
     download_url: str
 
-# Verificación de API funcionando
 @app.get("/")
 def home():
-    return {"message": "API funcionando correctamente en Render"}
+    return {"message": "API funcionando correctamente"}
 
-# Endpoint para generar un wireframe con estilos de Figma
 @app.post("/generate-wireframe", response_model=WireframeResponse)
 async def generate_wireframe(request: Request):
     try:
         data = await request.json()
         prompt = data.get("prompt")
-
+        
         if not prompt:
             raise HTTPException(status_code=400, detail="Prompt no recibido")
+        
+        selected_style = get_best_matching_style(prompt)
+        if not selected_style:
+            raise HTTPException(status_code=400, detail="No se encontró un estilo adecuado en Figma")
 
-        # 🔍 1️⃣ Buscar un frame existente en Figma
-        frame_id = find_existing_frame()
-
+        frame_id = create_frame_in_figma(selected_style)
         if not frame_id:
-            raise HTTPException(status_code=404, detail="No se encontró un frame existente en Figma")
+            raise HTTPException(status_code=500, detail="Error al crear el frame en Figma")
 
-        # 📥 2️⃣ Obtener la imagen del wireframe
         wireframe_url = get_figma_image(frame_id)
-
         if not wireframe_url:
-            raise HTTPException(status_code=500, detail="No se pudo obtener la imagen de Figma")
+            raise HTTPException(status_code=500, detail="No se pudo obtener la imagen del wireframe")
 
-        response_data = WireframeResponse(
-            info="Wireframe generado correctamente",
-            download_url=wireframe_url
-        )
-
-        return json.loads(response_data.json())
-
+        return WireframeResponse(info="Wireframe generado correctamente", download_url=wireframe_url)
+    
     except HTTPException as http_exc:
         raise http_exc
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 
 
-# 🔍 **Función para encontrar un frame existente en Figma**
-def find_existing_frame():
+def get_best_matching_style(prompt: str):
     try:
-        headers = {"X-Figma-Token": FIGMA_TOKEN}
-        url = f"https://api.figma.com/v1/files/{FIGMA_FILE_KEY}/nodes?ids=1527:615"
-
-        response = requests.get(url, headers=headers)
-
+        response = requests.get(f"https://api.figma.com/v1/files/{FIGMA_FILE_KEY}/styles", headers=HEADERS)
         if response.status_code != 200:
-            print(f"Error al obtener frame de Figma: {response.text}")
             return None
-
-        data = response.json()
-        node = data.get("nodes", {}).get("1527:615", {})
-
-        return node.get("document", {}).get("id", None)
-
+        
+        styles = response.json().get("meta", {}).get("styles", [])
+        
+        prompt_lower = prompt.lower()
+        for style in styles:
+            if any(keyword in prompt_lower for keyword in style.get("name", "").lower().split()):
+                return style
+        
+        return styles[0] if styles else None
     except Exception as e:
-        print(f"Error buscando frame en Figma: {e}")
+        print(f"Error obteniendo estilos: {e}")
         return None
 
 
-# 📥 **Función para obtener la imagen del wireframe**
+def create_frame_in_figma(style):
+    try:
+        frame_data = {
+            "name": "Wireframe generado",
+            "type": "FRAME",
+            "absoluteBoundingBox": {"x": 100, "y": 100, "width": 800, "height": 600},
+            "style": {"backgroundColor": {"r": 1, "g": 1, "b": 1, "a": 1}},
+            "style_id": style["key"]
+        }
+        
+        response = requests.post(f"https://api.figma.com/v1/files/{FIGMA_FILE_KEY}/nodes", headers=HEADERS, json=frame_data)
+        if response.status_code == 200:
+            return response.json().get("id", "")
+        else:
+            print(f"Error al crear frame en Figma: {response.text}")
+            return None
+    except Exception as e:
+        print(f"Error creando frame: {e}")
+        return None
+
+
 def get_figma_image(frame_id):
     try:
-        headers = {"X-Figma-Token": FIGMA_TOKEN}
-        url = f"https://api.figma.com/v1/images/{FIGMA_FILE_KEY}?ids={frame_id}"
-
-        response = requests.get(url, headers=headers)
-
-        if response.status_code != 200:
-            print(f"Error al obtener imagen de Figma: {response.text}")
+        response = requests.get(f"https://api.figma.com/v1/images/{FIGMA_FILE_KEY}?ids={frame_id}", headers=HEADERS)
+        if response.status_code == 200:
+            return response.json().get("images", {}).get(frame_id, "")
+        else:
+            print(f"Error al obtener imagen: {response.text}")
             return None
-
-        image_data = response.json()
-        return image_data.get("images", {}).get(frame_id, "")
-
     except Exception as e:
         print(f"Error obteniendo imagen de Figma: {e}")
         return None
