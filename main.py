@@ -3,7 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 import requests
-import json
+import shutil
+import uuid
 
 app = FastAPI()
 
@@ -26,18 +27,16 @@ class WireframeResponse(BaseModel):
     info: str
     download_url: str
 
-
 @app.get("/")
 def home():
     return {"message": "API funcionando correctamente"}
 
+@app.get("/robots.txt")
+def robots():
+    return "User-agent: *\nDisallow:", 200
 
 @app.post("/generate-wireframe", response_model=WireframeResponse)
 async def generate_wireframe(request: Request):
-    """
-    Endpoint que genera un wireframe a partir de un prompt, buscando el mejor estilo en Figma
-    y generando una imagen del wireframe resultante.
-    """
     try:
         data = await request.json()
         prompt = data.get("prompt")
@@ -47,7 +46,6 @@ async def generate_wireframe(request: Request):
         if not prompt:
             raise HTTPException(status_code=400, detail="Prompt no recibido")
 
-        # Obtener todos los node_id si no se especifica
         if not node_id:
             node_id = get_all_node_ids(file_id)
             if not node_id:
@@ -57,27 +55,24 @@ async def generate_wireframe(request: Request):
         if not selected_style:
             raise HTTPException(status_code=400, detail="No se encontró un estilo adecuado en Figma")
 
-        # Figma NO permite la creación de nuevos nodos a través de la API
-        # Por lo que esta parte se comenta y se sugiere hacer el wireframe manualmente
-        # frame_id = create_frame_in_figma(selected_style, file_id, node_id)
-        # if not frame_id:
-        #     raise HTTPException(status_code=500, detail="Error al crear el frame en Figma")
-
-        # En su lugar, obtenemos la imagen de un nodo existente
         wireframe_url = get_figma_image(file_id, node_id)
         if not wireframe_url:
-            raise HTTPException(status_code=500, detail="No se pudo obtener la imagen del wireframe")
+            raise HTTPException(status_code=500, detail="Error al obtener la imagen de Figma (puede ser una URL demasiado larga)")
+        
+        download_url = download_and_serve_figma_image(wireframe_url)
+        if not download_url:
+            raise HTTPException(status_code=500, detail="Error al descargar y servir la imagen")
 
-        return WireframeResponse(info="Wireframe obtenido correctamente", download_url=wireframe_url)
+        return WireframeResponse(info="Wireframe obtenido correctamente", download_url=download_url)
     
     except HTTPException as http_exc:
+        print(f"HTTPException: {http_exc.detail}")
         raise http_exc
     except Exception as e:
+        print(f"Error inesperado: {e}")
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 
-
 def get_all_node_ids(file_id):
-    """Obtiene todos los node_id dentro del archivo de Figma."""
     try:
         response = requests.get(f"https://api.figma.com/v1/files/{file_id}", headers=HEADERS)
         if response.status_code != 200:
@@ -86,24 +81,21 @@ def get_all_node_ids(file_id):
 
         data = response.json()
         nodes = []
-
+        
         def extract_nodes(node):
             if "id" in node:
                 nodes.append(node["id"])
             if "children" in node:
                 for child in node["children"]:
                     extract_nodes(child)
-
+        
         extract_nodes(data.get("document", {}))
         return nodes if nodes else None
-
     except Exception as e:
         print(f"Error al obtener los nodos de Figma: {e}")
         return None
 
-
 def get_best_matching_style(prompt: str, file_id):
-    """Busca el mejor estilo en Figma basado en el prompt."""
     try:
         response = requests.get(f"https://api.figma.com/v1/files/{file_id}/styles", headers=HEADERS)
         if response.status_code != 200:
@@ -127,9 +119,7 @@ def get_best_matching_style(prompt: str, file_id):
         print(f"Error obteniendo estilos: {e}")
         return None
 
-
 def get_figma_image(file_id, node_id):
-    """Obtiene la URL de la imagen de un nodo en Figma."""
     try:
         response = requests.get(f"https://api.figma.com/v1/images/{file_id}?ids={node_id}", headers=HEADERS)
         if response.status_code == 200:
@@ -139,4 +129,21 @@ def get_figma_image(file_id, node_id):
             return None
     except Exception as e:
         print(f"Error obteniendo imagen de Figma: {e}")
+        return None
+
+def download_and_serve_figma_image(figma_url):
+    try:
+        response = requests.get(figma_url, stream=True)
+        if response.status_code != 200:
+            print(f"Error descargando imagen: {response.text}")
+            return None
+
+        file_name = f"static/{uuid.uuid4()}.png"
+        os.makedirs("static", exist_ok=True)
+        with open(file_name, "wb") as out_file:
+            shutil.copyfileobj(response.raw, out_file)
+
+        return f"https://webmasterpro.onrender.com/{file_name}"
+    except Exception as e:
+        print(f"Error guardando imagen: {e}")
         return None
