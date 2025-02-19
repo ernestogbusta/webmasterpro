@@ -1,9 +1,9 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles  # 🔥 Importar para servir archivos estáticos
 from pydantic import BaseModel
 import os
 import requests
-import json
 import uuid
 
 app = FastAPI()
@@ -16,6 +16,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 📌 Crear directorio `static/` si no existe
+STATIC_DIR = "static"
+os.makedirs(STATIC_DIR, exist_ok=True)
+
+# 🔥 Montar la carpeta `static/` para servir imágenes
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # Configuración de la API de Figma
 FIGMA_TOKEN = os.getenv("FIGMA_TOKEN")
@@ -69,7 +76,12 @@ async def generate_wireframe(request: Request):
         if not wireframe_url:
             raise HTTPException(status_code=500, detail="No se pudo obtener la imagen del wireframe")
 
-        return WireframeResponse(info="Wireframe obtenido correctamente", download_url=wireframe_url)
+        # Guardar la imagen localmente en /static/
+        local_filename = download_and_save_image(wireframe_url)
+        if not local_filename:
+            raise HTTPException(status_code=500, detail="Error al guardar la imagen")
+
+        return WireframeResponse(info="Wireframe obtenido correctamente", download_url=f"https://webmasterpro.onrender.com/static/{local_filename}")
     
     except HTTPException as http_exc:
         raise http_exc
@@ -114,11 +126,7 @@ def get_figma_image(file_id, node_id):
             img_url = response.json().get("images", {}).get(node_id, "")
             if not img_url:
                 return None
-            
-            # Descargar la imagen y servirla desde el servidor
-            local_filename = download_and_save_image(img_url)
-            return f"https://webmasterpro.onrender.com/static/{local_filename}"
-
+            return img_url
         else:
             print(f"Error al obtener imagen: {response.text}")
             return None
@@ -133,13 +141,13 @@ def download_and_save_image(image_url):
         response = requests.get(image_url, stream=True)
         if response.status_code == 200:
             filename = f"{uuid.uuid4()}.png"
-            filepath = f"static/{filename}"
+            filepath = os.path.join(STATIC_DIR, filename)
 
-            os.makedirs("static", exist_ok=True)  # Crear directorio si no existe
             with open(filepath, "wb") as f:
                 for chunk in response.iter_content(1024):
                     f.write(chunk)
 
+            print(f"✅ Imagen guardada en {filepath}")
             return filename
         else:
             print(f"Error descargando imagen: {response.text}")
