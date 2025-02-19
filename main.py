@@ -116,22 +116,28 @@ def get_all_node_ids(file_id):
 
 
 def get_figma_image(file_id, node_id):
-    """Obtiene la URL de la imagen de un nodo en Figma con escala reducida."""
+    """Obtiene la URL de la imagen de un nodo en Figma con escala mejorada."""
     try:
+        print(f"🔍 Solicitando imagen para file_id={file_id} y node_id={node_id}")
+
         response = requests.get(
-            f"https://api.figma.com/v1/images/{file_id}?ids={node_id}&scale=2",
+            f"https://api.figma.com/v1/images/{file_id}?ids={node_id}&scale=3&format=png",
             headers=HEADERS
         )
+
         if response.status_code == 200:
             img_url = response.json().get("images", {}).get(node_id, "")
             if not img_url:
+                print("⚠️ La API de Figma no devolvió una URL de imagen.")
                 return None
+            print(f"✅ URL de imagen obtenida: {img_url}")
             return img_url
         else:
-            print(f"Error al obtener imagen: {response.text}")
+            print(f"❌ Error al obtener imagen: {response.text}")
             return None
+
     except Exception as e:
-        print(f"Error obteniendo imagen de Figma: {e}")
+        print(f"⚠️ Error obteniendo imagen de Figma: {e}")
         return None
 
 
