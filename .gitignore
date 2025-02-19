@@ -1,0 +1,7 @@
+# Ignorar entorno virtual
+venv/
+__pycache__/
+.env
+
+# Archivos de configuración de sistema
+.DS_Store
