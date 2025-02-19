@@ -40,26 +40,20 @@ async def generate_wireframe(request: Request):
         if not prompt:
             raise HTTPException(status_code=400, detail="Prompt no recibido")
 
-        # 🔍 1️⃣ Seleccionar estilo adecuado según el prompt
-        selected_style = get_best_matching_style(prompt)
-
-        if not selected_style:
-            raise HTTPException(status_code=400, detail="No se encontró un estilo adecuado en Figma")
-
-        # 🎨 2️⃣ Crear un frame en Figma con el estilo elegido
-        frame_id = create_frame_in_figma(selected_style)
+        # 🔍 1️⃣ Buscar un frame existente en Figma
+        frame_id = find_existing_frame()
 
         if not frame_id:
-            raise HTTPException(status_code=500, detail="Error al crear el frame en Figma")
+            raise HTTPException(status_code=404, detail="No se encontró un frame existente en Figma")
 
-        # 📥 3️⃣ Obtener la imagen del wireframe
+        # 📥 2️⃣ Obtener la imagen del wireframe
         wireframe_url = get_figma_image(frame_id)
 
         if not wireframe_url:
             raise HTTPException(status_code=500, detail="No se pudo obtener la imagen de Figma")
 
         response_data = WireframeResponse(
-            info="Wireframe generado correctamente con el estilo adecuado",
+            info="Wireframe generado correctamente",
             download_url=wireframe_url
         )
 
@@ -71,72 +65,25 @@ async def generate_wireframe(request: Request):
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 
 
-# 🔍 **Función para encontrar el mejor estilo según el prompt**
-def get_best_matching_style(prompt: str):
+# 🔍 **Función para encontrar un frame existente en Figma**
+def find_existing_frame():
     try:
         headers = {"X-Figma-Token": FIGMA_TOKEN}
-        url = f"https://api.figma.com/v1/files/{FIGMA_FILE_KEY}/styles"
+        url = f"https://api.figma.com/v1/files/{FIGMA_FILE_KEY}/nodes?ids=1527:615"
 
         response = requests.get(url, headers=headers)
 
         if response.status_code != 200:
-            print(f"Error al obtener estilos de Figma: {response.text}")
+            print(f"Error al obtener frame de Figma: {response.text}")
             return None
 
-        styles_data = response.json()
+        data = response.json()
+        node = data.get("nodes", {}).get("1527:615", {})
 
-        available_styles = styles_data.get("meta", {}).get("styles", [])
-
-        if not available_styles:
-            print("No se encontraron estilos en Figma.")
-            return None
-
-        prompt_lower = prompt.lower()
-
-        # Buscar coincidencia exacta
-        for style in available_styles:
-            style_name = style.get("name", "").lower()
-            if any(keyword in prompt_lower for keyword in style_name.split()):
-                return style
-
-        # Si no hay coincidencias exactas, devolver el primer estilo disponible como fallback
-        return available_styles[0] if available_styles else None
+        return node.get("document", {}).get("id", None)
 
     except Exception as e:
-        print(f"Error obteniendo estilos de Figma: {e}")
-        return None
-
-
-# 🎨 **Función para crear un frame en Figma con un estilo específico**
-def create_frame_in_figma(style):
-    try:
-        headers = {
-            "X-Figma-Token": FIGMA_TOKEN,
-            "Content-Type": "application/json"
-        }
-
-        frame_data = {
-            "name": "Wireframe generado",
-            "type": "FRAME",
-            "absoluteBoundingBox": {"x": 100, "y": 100, "width": 600, "height": 400},
-            "style": {"backgroundColor": {"r": 1, "g": 1, "b": 1, "a": 1}},
-            "style_id": style["key"]
-        }
-
-        url = f"https://api.figma.com/v1/files/{FIGMA_FILE_KEY}/nodes"
-
-        response = requests.post(url, headers=headers, json=frame_data)
-
-        if response.status_code == 200:
-            response_json = response.json()
-            node_id = response_json.get("id", "")
-            return node_id if node_id else None
-        else:
-            print(f"Error al crear frame en Figma: {response.text}")
-            return None
-
-    except Exception as e:
-        print(f"Error creando frame: {e}")
+        print(f"Error buscando frame en Figma: {e}")
         return None
 
 
