@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles  # 🔥 Importar para servir archivos estáticos
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import os
 import requests
@@ -60,23 +60,28 @@ async def generate_wireframe(request: Request):
         if not prompt:
             raise HTTPException(status_code=400, detail="Prompt no recibido")
 
-        # Obtener todos los node_id si no se especifica
+        # ✅ 1️⃣ Obtener lista de nodos si no se especifica uno
         if not node_id:
             node_id_list = get_all_node_ids(file_id)
             if not node_id_list:
                 raise HTTPException(status_code=400, detail="No se encontraron nodos en Figma")
             node_id = node_id_list[0]  # Usar el primer nodo disponible
 
+        # ✅ 2️⃣ Elegir el mejor estilo en base al prompt
+        selected_style = get_best_matching_style(prompt, file_id)
+        if not selected_style:
+            raise HTTPException(status_code=400, detail="No se encontró un estilo adecuado en Figma")
+
         # Si el formato solicitado es "figma", devolver el node_id en lugar de la imagen
         if format_type == "figma":
             return WireframeResponse(info="Wireframe generado en Figma", download_url=f"https://www.figma.com/file/{file_id}?node-id={node_id}")
 
-        # Obtener la imagen con URL reducida
+        # ✅ 3️⃣ Obtener la imagen con URL reducida
         wireframe_url = get_figma_image(file_id, node_id)
         if not wireframe_url:
             raise HTTPException(status_code=500, detail="No se pudo obtener la imagen del wireframe")
 
-        # Guardar la imagen localmente en /static/
+        # ✅ 4️⃣ Guardar la imagen localmente en /static/
         local_filename = download_and_save_image(wireframe_url)
         if not local_filename:
             raise HTTPException(status_code=500, detail="Error al guardar la imagen")
@@ -112,6 +117,34 @@ def get_all_node_ids(file_id):
 
     except Exception as e:
         print(f"Error al obtener los nodos de Figma: {e}")
+        return None
+
+
+def get_best_matching_style(prompt: str, file_id):
+    """Busca el mejor estilo en Figma basado en el prompt."""
+    try:
+        response = requests.get(f"https://api.figma.com/v1/files/{file_id}/styles", headers=HEADERS)
+        if response.status_code != 200:
+            print(f"Error obteniendo estilos: {response.text}")
+            return None
+
+        styles = response.json().get("meta", {}).get("styles", [])
+        
+        if not styles:
+            print("No se encontraron estilos en Figma.")
+            return None
+
+        prompt_lower = prompt.lower()
+
+        # Buscar el estilo que mejor coincida con el prompt
+        for style in styles:
+            if any(keyword in prompt_lower for keyword in style.get("name", "").lower().split()):
+                print(f"✅ Estilo seleccionado: {style['name']}")
+                return style
+
+        return styles[0] if styles else None
+    except Exception as e:
+        print(f"Error obteniendo estilos: {e}")
         return None
 
 
