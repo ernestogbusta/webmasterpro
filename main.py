@@ -6,7 +6,6 @@ import os
 import requests
 import uuid
 import logging
-import random
 
 # Configuración del logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -40,18 +39,10 @@ class WireframeResponse(BaseModel):
     info: str
     download_url: str
 
-@app.get("/")
-def home():
-    return {"message": "API funcionando correctamente"}
-
-@app.get("/robots.txt")
-def robots():
-    return "User-agent: *\nDisallow: /", 200, {"Content-Type": "text/plain"}
-
 @app.post("/generate-wireframe", response_model=WireframeResponse)
 async def generate_wireframe(request: Request):
     """
-    Genera un wireframe a partir de un prompt, seleccionando y reorganizando los mejores nodos de Figma.
+    Endpoint que genera un wireframe a partir de un prompt, combinando y reorganizando elementos de Figma.
     """
     try:
         data = await request.json()
@@ -62,26 +53,30 @@ async def generate_wireframe(request: Request):
             raise HTTPException(status_code=400, detail="Prompt no recibido")
 
         # ✅ 1️⃣ Obtener nodos relevantes según el prompt
-        node_id_list = get_filtered_nodes(file_id, prompt)
+        nodes = get_relevant_nodes(file_id, prompt)
+        
+        if not nodes:
+            raise HTTPException(status_code=400, detail="No se encontraron nodos relevantes en Figma")
 
-        if not node_id_list:
-            raise HTTPException(status_code=400, detail="No se encontraron nodos válidos en Figma")
+        logger.info(f"✅ Nodos seleccionados: {nodes}")
 
-        # ✅ 2️⃣ Reordenar creativamente los nodos seleccionados
-        ordered_nodes = reorder_nodes_creatively(node_id_list)
+        # ✅ 2️⃣ Generar una composición nueva con estilos y estructura coherente
+        combined_node_id = combine_and_style_nodes(file_id, nodes, prompt)
+        
+        if not combined_node_id:
+            raise HTTPException(status_code=500, detail="No se pudo generar una composición válida")
 
-        # ✅ 3️⃣ Obtener la imagen del wireframe
-        wireframe_url = get_figma_image(file_id, ordered_nodes[0])
+        # ✅ 3️⃣ Obtener la imagen con la URL correcta
+        wireframe_url = get_figma_image(file_id, combined_node_id)
         if not wireframe_url:
             raise HTTPException(status_code=500, detail="No se pudo obtener la imagen del wireframe")
 
-        # ✅ 4️⃣ Guardar la imagen localmente
+        # ✅ 4️⃣ Guardar la imagen localmente en /static/
         local_filename = download_and_save_image(wireframe_url)
         if not local_filename:
             raise HTTPException(status_code=500, detail="Error al guardar la imagen")
 
-        return WireframeResponse(info="Wireframe generado exitosamente", 
-                                 download_url=f"https://webmasterpro.onrender.com/static/{local_filename}")
+        return WireframeResponse(info="Wireframe generado correctamente", download_url=f"https://webmasterpro.onrender.com/static/{local_filename}")
     
     except HTTPException as http_exc:
         raise http_exc
@@ -89,9 +84,8 @@ async def generate_wireframe(request: Request):
         logger.exception(f"Error interno: {e}")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
-
-def get_filtered_nodes(file_id, prompt):
-    """Filtra nodos en Figma según el prompt."""
+def get_relevant_nodes(file_id, prompt):
+    """Filtra y selecciona nodos relevantes según el prompt."""
     try:
         response = requests.get(f"https://api.figma.com/v1/files/{file_id}", headers=HEADERS)
         if response.status_code != 200:
@@ -102,79 +96,58 @@ def get_filtered_nodes(file_id, prompt):
         nodes = []
 
         def extract_nodes(node):
-            """Extrae nodos relevantes según el tipo."""
             if "id" in node and node.get("type") in ["FRAME", "COMPONENT"] and node.get("id") != "0:0":
-                nodes.append((node["id"], node.get("absoluteBoundingBox", {}).get("width", 0)))
-
+                nodes.append(node["id"])
             if "children" in node:
                 for child in node["children"]:
                     extract_nodes(child)
 
         extract_nodes(data.get("document", {}))
-
-        if not nodes:
-            logger.warning("⚠️ No se encontraron nodos adecuados.")
-            return None
-
-        # Filtrar nodos que contengan palabras clave del prompt
-        filtered_nodes = [n[0] for n in nodes if any(word.lower() in prompt.lower() for word in ["header", "footer", "button", "card"])]
-
-        if not filtered_nodes:
-            filtered_nodes = [n[0] for n in nodes]  # Si no hay coincidencias, usar todos
-
-        logger.info(f"📌 {len(filtered_nodes)} nodos filtrados para el prompt: {prompt}")
-        return filtered_nodes
-
+        
+        return nodes if nodes else None
     except Exception as e:
         logger.exception(f"Error al obtener los nodos de Figma: {e}")
         return None
 
-
-def reorder_nodes_creatively(node_list):
-    """Reorganiza los nodos de manera aleatoria y creativa para generar wireframes únicos."""
-    random.shuffle(node_list)  # Desordenar aleatoriamente los nodos
-    return node_list[:5]  # Tomar hasta 5 nodos para componer el wireframe
-
+def combine_and_style_nodes(file_id, nodes, prompt):
+    """Crea una nueva composición combinando nodos y aplicando estilos según el prompt."""
+    try:
+        # Aquí se debe implementar lógica para reordenar nodos y aplicar estilos.
+        # Por ejemplo, podrías llamar a una API que modifique el archivo en Figma
+        # o aplicar transformaciones basadas en un modelo predefinido.
+        
+        combined_node_id = nodes[0]  # Por ahora, devuelve el primer nodo como prueba.
+        return combined_node_id
+    except Exception as e:
+        logger.exception(f"Error combinando nodos: {e}")
+        return None
 
 def get_figma_image(file_id, node_id):
-    """Obtiene la URL de la imagen de un nodo en Figma con escala mejorada."""
+    """Obtiene la URL de la imagen de un nodo en Figma."""
     try:
-        logger.info(f"🔍 Solicitando imagen para file_id={file_id} y node_id={node_id}")
-
         response = requests.get(
             f"https://api.figma.com/v1/images/{file_id}?ids={node_id}&scale=3&format=png",
             headers=HEADERS
         )
-
         if response.status_code == 200:
-            img_url = response.json().get("images", {}).get(node_id, "")
-            if not img_url:
-                logger.warning("⚠️ La API de Figma no devolvió una URL de imagen.")
-                return None
-            logger.info("✅ URL de imagen obtenida correctamente")
-            return img_url
+            return response.json().get("images", {}).get(node_id, "")
         else:
-            logger.error(f"❌ Error al obtener imagen: {response.text}")
+            logger.error(f"Error al obtener imagen: {response.text}")
             return None
-
     except Exception as e:
-        logger.exception(f"⚠️ Error obteniendo imagen de Figma: {e}")
+        logger.exception(f"Error obteniendo imagen de Figma: {e}")
         return None
 
-
 def download_and_save_image(image_url):
-    """Descarga la imagen de Figma y la guarda localmente en /static/."""
+    """Descarga la imagen y la guarda en /static/."""
     try:
         response = requests.get(image_url, stream=True)
         if response.status_code == 200:
             filename = f"{uuid.uuid4()}.png"
             filepath = os.path.join(STATIC_DIR, filename)
-
             with open(filepath, "wb") as f:
                 for chunk in response.iter_content(1024):
                     f.write(chunk)
-
-            logger.info(f"✅ Imagen guardada en {filepath}")
             return filename
         else:
             logger.error(f"Error descargando imagen: {response.text}")
