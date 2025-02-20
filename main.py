@@ -61,20 +61,12 @@ async def generate_wireframe(request: Request):
         if not prompt:
             raise HTTPException(status_code=400, detail="Prompt no recibido")
 
-        # ✅ 1️⃣ Obtener una lista de nodos disponibles
-        node_id_list = get_all_node_ids(file_id)
+        # ✅ 1️⃣ Obtener una lista de nodos disponibles, filtrando por tipo relevante
+        node_id = get_best_wireframe_node(file_id)
 
-        if not node_id_list:
-            raise HTTPException(status_code=400, detail="No se encontraron nodos en Figma")
+        if not node_id:
+            raise HTTPException(status_code=400, detail="No se encontraron nodos válidos en Figma")
 
-        # ⚠️ Evitar seleccionar `0:0` (probablemente sea un fondo vacío)
-        node_id_list = [n for n in node_id_list if n != "0:0"]
-
-        if not node_id_list:
-            raise HTTPException(status_code=400, detail="No hay nodos válidos en el archivo de Figma")
-
-        # ✅ 2️⃣ Seleccionar el primer nodo con contenido
-        node_id = node_id_list[0]
         logger.info(f"✅ Nodo seleccionado: {node_id}")
 
         # ✅ 3️⃣ Obtener la imagen con la URL correcta
@@ -95,8 +87,8 @@ async def generate_wireframe(request: Request):
         logger.exception(f"Error interno: {e}")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
-def get_all_node_ids(file_id):
-    """Obtiene todos los node_id dentro del archivo de Figma."""
+def get_best_wireframe_node(file_id):
+    """Filtra los nodos y devuelve el mejor candidato."""
     try:
         response = requests.get(f"https://api.figma.com/v1/files/{file_id}", headers=HEADERS)
         if response.status_code != 200:
@@ -107,15 +99,26 @@ def get_all_node_ids(file_id):
         nodes = []
 
         def extract_nodes(node):
-            if "id" in node:
-                nodes.append(node["id"])
+            """Extrae solo nodos relevantes"""
+            if "id" in node and node.get("type") in ["FRAME", "COMPONENT"] and node.get("id") != "0:0":
+                nodes.append((node["id"], node.get("absoluteBoundingBox", {}).get("width", 0)))
+
             if "children" in node:
                 for child in node["children"]:
                     extract_nodes(child)
 
         extract_nodes(data.get("document", {}))
-        logger.info(f"📌 {len(nodes)} nodos obtenidos")
-        return nodes if nodes else None
+
+        if not nodes:
+            logger.warning("⚠️ No se encontraron nodos adecuados.")
+            return None
+
+        # Seleccionamos el nodo más grande en términos de ancho
+        nodes.sort(key=lambda x: x[1], reverse=True)
+        best_node = nodes[0][0]
+
+        logger.info(f"📌 {len(nodes)} nodos filtrados, seleccionando el más grande: {best_node}")
+        return best_node
 
     except Exception as e:
         logger.exception(f"Error al obtener los nodos de Figma: {e}")
