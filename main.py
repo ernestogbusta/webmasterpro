@@ -5,6 +5,11 @@ from pydantic import BaseModel
 import os
 import requests
 import uuid
+import logging
+
+# Configuración del logger
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -34,7 +39,6 @@ class WireframeResponse(BaseModel):
     info: str
     download_url: str
 
-
 @app.get("/")
 def home():
     return {"message": "API funcionando correctamente"}
@@ -42,7 +46,6 @@ def home():
 @app.get("/robots.txt")
 def robots():
     return "User-agent: *\nDisallow: /", 200, {"Content-Type": "text/plain"}
-
 
 @app.post("/generate-wireframe", response_model=WireframeResponse)
 async def generate_wireframe(request: Request):
@@ -53,9 +56,7 @@ async def generate_wireframe(request: Request):
     try:
         data = await request.json()
         prompt = data.get("prompt")
-        format_type = data.get("format", "png")
         file_id = data.get("file_id", FIGMA_FILE_KEY)
-        node_id = data.get("node_id")
 
         if not prompt:
             raise HTTPException(status_code=400, detail="Prompt no recibido")
@@ -74,7 +75,7 @@ async def generate_wireframe(request: Request):
 
         # ✅ 2️⃣ Seleccionar el primer nodo con contenido
         node_id = node_id_list[0]
-        print(f"✅ Nodo seleccionado: {node_id}")
+        logger.info(f"✅ Nodo seleccionado: {node_id}")
 
         # ✅ 3️⃣ Obtener la imagen con la URL correcta
         wireframe_url = get_figma_image(file_id, node_id)
@@ -91,15 +92,15 @@ async def generate_wireframe(request: Request):
     except HTTPException as http_exc:
         raise http_exc
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
-
+        logger.exception(f"Error interno: {e}")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 def get_all_node_ids(file_id):
     """Obtiene todos los node_id dentro del archivo de Figma."""
     try:
         response = requests.get(f"https://api.figma.com/v1/files/{file_id}", headers=HEADERS)
         if response.status_code != 200:
-            print(f"Error obteniendo nodos: {response.text}")
+            logger.error(f"Error obteniendo nodos: {response.text}")
             return None
 
         data = response.json()
@@ -113,18 +114,17 @@ def get_all_node_ids(file_id):
                     extract_nodes(child)
 
         extract_nodes(data.get("document", {}))
-        print(f"📌 Lista de nodos obtenida: {nodes}")
+        logger.info(f"📌 {len(nodes)} nodos obtenidos")
         return nodes if nodes else None
 
     except Exception as e:
-        print(f"Error al obtener los nodos de Figma: {e}")
+        logger.exception(f"Error al obtener los nodos de Figma: {e}")
         return None
-
 
 def get_figma_image(file_id, node_id):
     """Obtiene la URL de la imagen de un nodo en Figma con escala mejorada."""
     try:
-        print(f"🔍 Solicitando imagen para file_id={file_id} y node_id={node_id}")
+        logger.info(f"🔍 Solicitando imagen para file_id={file_id} y node_id={node_id}")
 
         response = requests.get(
             f"https://api.figma.com/v1/images/{file_id}?ids={node_id}&scale=3&format=png",
@@ -134,18 +134,17 @@ def get_figma_image(file_id, node_id):
         if response.status_code == 200:
             img_url = response.json().get("images", {}).get(node_id, "")
             if not img_url:
-                print("⚠️ La API de Figma no devolvió una URL de imagen.")
+                logger.warning("⚠️ La API de Figma no devolvió una URL de imagen.")
                 return None
-            print(f"✅ URL de imagen obtenida: {img_url}")
+            logger.info("✅ URL de imagen obtenida correctamente")
             return img_url
         else:
-            print(f"❌ Error al obtener imagen: {response.text}")
+            logger.error(f"❌ Error al obtener imagen: {response.text}")
             return None
 
     except Exception as e:
-        print(f"⚠️ Error obteniendo imagen de Figma: {e}")
+        logger.exception(f"⚠️ Error obteniendo imagen de Figma: {e}")
         return None
-
 
 def download_and_save_image(image_url):
     """Descarga la imagen de Figma y la guarda localmente en /static/."""
@@ -159,11 +158,11 @@ def download_and_save_image(image_url):
                 for chunk in response.iter_content(1024):
                     f.write(chunk)
 
-            print(f"✅ Imagen guardada en {filepath}")
+            logger.info(f"✅ Imagen guardada en {filepath}")
             return filename
         else:
-            print(f"Error descargando imagen: {response.text}")
+            logger.error(f"Error descargando imagen: {response.text}")
             return None
     except Exception as e:
-        print(f"Error al descargar imagen: {e}")
+        logger.exception(f"Error al descargar imagen: {e}")
         return None
