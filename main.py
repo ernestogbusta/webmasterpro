@@ -58,14 +58,19 @@ async def generate_wireframe(request: Request = None, prompt: str = Query(None))
         if not nodes:
             raise HTTPException(status_code=400, detail="No se encontraron nodos relevantes en Figma")
 
-        # ✅ 2️⃣ Combinar nodos y aplicar estilos
-        combined_node_id = combine_and_style_nodes(file_id, nodes, prompt)
+        # ✅ 2️⃣ Validar nodos y generar composición
+        valid_nodes = [node for node in nodes if node]  # Filtra nodos vacíos o inválidos
+        if not valid_nodes:
+            raise HTTPException(status_code=500, detail="Nodos inválidos o vacíos")
+
+        combined_node_id = combine_and_style_nodes(file_id, valid_nodes, prompt)
         if not combined_node_id:
             raise HTTPException(status_code=500, detail="No se pudo generar una composición válida")
 
         # ✅ 3️⃣ Obtener imagen del wireframe
         wireframe_url = get_figma_image(file_id, combined_node_id)
         if not wireframe_url:
+            logger.error(f"❌ No se pudo obtener la imagen para el nodo {combined_node_id}")
             raise HTTPException(status_code=500, detail="No se pudo obtener la imagen del wireframe")
 
         # ✅ 4️⃣ Guardar la imagen en /static/
@@ -134,7 +139,14 @@ def get_figma_image(file_id, node_id):
             headers=HEADERS
         )
         if response.status_code == 200:
-            return response.json().get("images", {}).get(node_id, "")
+            image_data = response.json().get("images", {})
+            image_url = image_data.get(node_id, "")
+
+            if not image_url:
+                logger.error(f"⚠️ La API de Figma no devolvió una URL válida para el nodo {node_id}")
+                return None
+
+            return image_url
         else:
             logger.error(f"⚠️ Error al obtener imagen: {response.status_code}")
             return None
