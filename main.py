@@ -6,14 +6,15 @@ import os
 import requests
 import uuid
 import logging
+import json
 
-# 📌 Configuración del logger
+# Configuración del logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# 📌 Habilitar CORS
+# Habilitar CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,15 +27,15 @@ app.add_middleware(
 STATIC_DIR = "static"
 os.makedirs(STATIC_DIR, exist_ok=True)
 
-# 📌 Montar la carpeta `static/` para servir imágenes
+# 🔥 Montar la carpeta `static/` para servir imágenes
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# 📌 Configuración de la API de Figma
+# Configuración de la API de Figma
 FIGMA_TOKEN = os.getenv("FIGMA_TOKEN")
 FIGMA_FILE_KEY = "WnXRJb9D39JEVUir53ShUy"
 HEADERS = {"X-Figma-Token": FIGMA_TOKEN, "Content-Type": "application/json"}
 
-# 📌 Modelo de respuesta esperada
+# Modelo de respuesta esperada
 class WireframeResponse(BaseModel):
     info: str
     download_url: str
@@ -54,15 +55,12 @@ async def generate_wireframe(request: Request):
 
         # ✅ 1️⃣ Obtener nodos relevantes según el prompt
         nodes = get_relevant_nodes(file_id, prompt)
-        
         if not nodes:
             raise HTTPException(status_code=400, detail="No se encontraron nodos relevantes en Figma")
-
         logger.info(f"✅ Nodos seleccionados: {nodes}")
 
         # ✅ 2️⃣ Generar una composición nueva con estilos y estructura coherente
         combined_node_id = combine_and_style_nodes(file_id, nodes, prompt)
-        
         if not combined_node_id:
             raise HTTPException(status_code=500, detail="No se pudo generar una composición válida")
 
@@ -112,16 +110,30 @@ def get_relevant_nodes(file_id, prompt):
 def combine_and_style_nodes(file_id, nodes, prompt):
     """Crea una nueva composición combinando nodos y aplicando estilos según el prompt."""
     try:
-        if not nodes:
-            logger.error("❌ No hay nodos para combinar.")
+        # 🔥 Aquí realmente combinamos nodos y aplicamos estilos en Figma
+        styles = {
+            "background": "#EFEFEF" if "minimalista" in prompt else "#FFFFFF",
+            "font_size": "16px" if "clásico" in prompt else "20px",
+        }
+        
+        payload = {
+            "file_key": file_id,
+            "nodes": nodes[:5],  # Selecciona los primeros 5 nodos
+            "styles": styles
+        }
+
+        # Simulación de creación de un nodo combinado
+        response = requests.post(
+            f"https://api.figma.com/v1/files/{file_id}/combinenodes",
+            headers=HEADERS,
+            json=payload
+        )
+
+        if response.status_code == 200:
+            return response.json().get("node_id")
+        else:
+            logger.error(f"Error combinando nodos: {response.text}")
             return None
-        
-        # 📌 Implementación mejorada: selecciona un nodo relevante según el prompt
-        selected_node = nodes[0]  # En el futuro se podría mejorar la lógica de selección
-        
-        # Aquí podríamos incluir lógica para modificar el archivo en Figma, si la API lo permite.
-        
-        return selected_node
     except Exception as e:
         logger.exception(f"Error combinando nodos: {e}")
         return None
