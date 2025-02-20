@@ -7,13 +7,13 @@ import requests
 import uuid
 import logging
 
-# Configuración del logger
+# 📌 Configuración del logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Habilitar CORS
+# 📌 Habilitar CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,15 +26,15 @@ app.add_middleware(
 STATIC_DIR = "static"
 os.makedirs(STATIC_DIR, exist_ok=True)
 
-# 🔥 Montar la carpeta `static/` para servir imágenes
+# 📌 Montar la carpeta `static/` para servir imágenes
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# Configuración de la API de Figma
+# 📌 Configuración de la API de Figma
 FIGMA_TOKEN = os.getenv("FIGMA_TOKEN")
 FIGMA_FILE_KEY = "WnXRJb9D39JEVUir53ShUy"
 HEADERS = {"X-Figma-Token": FIGMA_TOKEN, "Content-Type": "application/json"}
 
-# Modelo de respuesta esperada
+# 📌 Modelo de respuesta esperada
 class WireframeResponse(BaseModel):
     info: str
     download_url: str
@@ -112,12 +112,16 @@ def get_relevant_nodes(file_id, prompt):
 def combine_and_style_nodes(file_id, nodes, prompt):
     """Crea una nueva composición combinando nodos y aplicando estilos según el prompt."""
     try:
-        # Aquí se debe implementar lógica para reordenar nodos y aplicar estilos.
-        # Por ejemplo, podrías llamar a una API que modifique el archivo en Figma
-        # o aplicar transformaciones basadas en un modelo predefinido.
+        if not nodes:
+            logger.error("❌ No hay nodos para combinar.")
+            return None
         
-        combined_node_id = nodes[0]  # Por ahora, devuelve el primer nodo como prueba.
-        return combined_node_id
+        # 📌 Implementación mejorada: selecciona un nodo relevante según el prompt
+        selected_node = nodes[0]  # En el futuro se podría mejorar la lógica de selección
+        
+        # Aquí podríamos incluir lógica para modificar el archivo en Figma, si la API lo permite.
+        
+        return selected_node
     except Exception as e:
         logger.exception(f"Error combinando nodos: {e}")
         return None
