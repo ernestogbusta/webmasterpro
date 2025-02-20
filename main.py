@@ -6,6 +6,7 @@ import os
 import requests
 import uuid
 import logging
+import random
 
 # Configuración del logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -50,8 +51,7 @@ def robots():
 @app.post("/generate-wireframe", response_model=WireframeResponse)
 async def generate_wireframe(request: Request):
     """
-    Endpoint que genera un wireframe a partir de un prompt, buscando el mejor estilo en Figma
-    y generando una imagen del wireframe resultante.
+    Genera un wireframe a partir de un prompt, seleccionando y reorganizando los mejores nodos de Figma.
     """
     try:
         data = await request.json()
@@ -61,25 +61,27 @@ async def generate_wireframe(request: Request):
         if not prompt:
             raise HTTPException(status_code=400, detail="Prompt no recibido")
 
-        # ✅ 1️⃣ Obtener una lista de nodos disponibles, filtrando por tipo relevante
-        node_id = get_best_wireframe_node(file_id)
+        # ✅ 1️⃣ Obtener nodos relevantes según el prompt
+        node_id_list = get_filtered_nodes(file_id, prompt)
 
-        if not node_id:
+        if not node_id_list:
             raise HTTPException(status_code=400, detail="No se encontraron nodos válidos en Figma")
 
-        logger.info(f"✅ Nodo seleccionado: {node_id}")
+        # ✅ 2️⃣ Reordenar creativamente los nodos seleccionados
+        ordered_nodes = reorder_nodes_creatively(node_id_list)
 
-        # ✅ 3️⃣ Obtener la imagen con la URL correcta
-        wireframe_url = get_figma_image(file_id, node_id)
+        # ✅ 3️⃣ Obtener la imagen del wireframe
+        wireframe_url = get_figma_image(file_id, ordered_nodes[0])
         if not wireframe_url:
             raise HTTPException(status_code=500, detail="No se pudo obtener la imagen del wireframe")
 
-        # ✅ 4️⃣ Guardar la imagen localmente en /static/
+        # ✅ 4️⃣ Guardar la imagen localmente
         local_filename = download_and_save_image(wireframe_url)
         if not local_filename:
             raise HTTPException(status_code=500, detail="Error al guardar la imagen")
 
-        return WireframeResponse(info="Wireframe obtenido correctamente", download_url=f"https://webmasterpro.onrender.com/static/{local_filename}")
+        return WireframeResponse(info="Wireframe generado exitosamente", 
+                                 download_url=f"https://webmasterpro.onrender.com/static/{local_filename}")
     
     except HTTPException as http_exc:
         raise http_exc
@@ -87,8 +89,9 @@ async def generate_wireframe(request: Request):
         logger.exception(f"Error interno: {e}")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
-def get_best_wireframe_node(file_id):
-    """Filtra los nodos y devuelve el mejor candidato."""
+
+def get_filtered_nodes(file_id, prompt):
+    """Filtra nodos en Figma según el prompt."""
     try:
         response = requests.get(f"https://api.figma.com/v1/files/{file_id}", headers=HEADERS)
         if response.status_code != 200:
@@ -99,7 +102,7 @@ def get_best_wireframe_node(file_id):
         nodes = []
 
         def extract_nodes(node):
-            """Extrae solo nodos relevantes"""
+            """Extrae nodos relevantes según el tipo."""
             if "id" in node and node.get("type") in ["FRAME", "COMPONENT"] and node.get("id") != "0:0":
                 nodes.append((node["id"], node.get("absoluteBoundingBox", {}).get("width", 0)))
 
@@ -113,16 +116,25 @@ def get_best_wireframe_node(file_id):
             logger.warning("⚠️ No se encontraron nodos adecuados.")
             return None
 
-        # Seleccionamos el nodo más grande en términos de ancho
-        nodes.sort(key=lambda x: x[1], reverse=True)
-        best_node = nodes[0][0]
+        # Filtrar nodos que contengan palabras clave del prompt
+        filtered_nodes = [n[0] for n in nodes if any(word.lower() in prompt.lower() for word in ["header", "footer", "button", "card"])]
 
-        logger.info(f"📌 {len(nodes)} nodos filtrados, seleccionando el más grande: {best_node}")
-        return best_node
+        if not filtered_nodes:
+            filtered_nodes = [n[0] for n in nodes]  # Si no hay coincidencias, usar todos
+
+        logger.info(f"📌 {len(filtered_nodes)} nodos filtrados para el prompt: {prompt}")
+        return filtered_nodes
 
     except Exception as e:
         logger.exception(f"Error al obtener los nodos de Figma: {e}")
         return None
+
+
+def reorder_nodes_creatively(node_list):
+    """Reorganiza los nodos de manera aleatoria y creativa para generar wireframes únicos."""
+    random.shuffle(node_list)  # Desordenar aleatoriamente los nodos
+    return node_list[:5]  # Tomar hasta 5 nodos para componer el wireframe
+
 
 def get_figma_image(file_id, node_id):
     """Obtiene la URL de la imagen de un nodo en Figma con escala mejorada."""
@@ -148,6 +160,7 @@ def get_figma_image(file_id, node_id):
     except Exception as e:
         logger.exception(f"⚠️ Error obteniendo imagen de Figma: {e}")
         return None
+
 
 def download_and_save_image(image_url):
     """Descarga la imagen de Figma y la guarda localmente en /static/."""
