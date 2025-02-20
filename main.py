@@ -159,3 +159,9 @@ def download_and_save_image(image_url):
     except Exception as e:
         logger.exception(f"Error al descargar imagen: {e}")
         return None
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.getenv("PORT", 8000))  # Usa el puerto de Render o 8000 por defecto
+    uvicorn.run(app, host="0.0.0.0", port=port)
